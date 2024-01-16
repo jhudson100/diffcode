@@ -53,11 +53,55 @@ ChangeInfo = collections.namedtuple( "ChangeInfo",
     "type line1 line2 content"
 )
 
+def error(msg):
+    sys.stderr.write(msg)
+    sys.stderr.write("\n")
+    sys.exit(1)
+    
+DIMENSIONS={
+    "in": 72, "cm": 72/2.54, "mm": 720/2.54, "pt": 1
+}
+DIMENSION_STRING=" or ".join(DIMENSIONS.keys())
+def toPoints(s):
+    sfx = s[-2:]
+    if sfx not in DIMENSIONS:
+        error(f"Bad suffix on dimension '{s}': Should be one of {DIMENSIONS}")
+    pfx = s[:-2]
+    return float(pfx) * DIMENSIONS[sfx]
+
+def toColor(s):
+    tmp = s.split(",")
+    if len(tmp) != 3:
+        error(f"Bad color specification '{s}': Should be three numbers (each one from 0 to 1) separated by commas")
+    try:
+        c = [float(q) for q in tmp]
+    except ValueError:
+        error(f"Bad color specification '{s}': Should be three numbers in the range 0 to 1 separated by commas")
+    mn = min(c)
+    mx = max(c)
+    if mn < 0 or mx > 1:
+        error(f"Bad color specification '{s}': Should be three numbers from 0 to 1 separated by commas")
+    return tuple(c)
+
+def parseDashPattern(p):
+    try:
+        tmp = p.split(",")
+        tmp = [float(q) for q in tmp]
+        if len(tmp) == 1 and tmp[0] == -1:
+            return []       #no dashes
+        mn = min(tmp)
+        if mn < 0:
+            raise ValueError()
+        return tmp
+    except ValueError:
+        error("Dash pattern should be a sequence of numbers separated by commas or else a single value of -1 to indicate no dashes")
+        
 def main():
 
     MACROS = "{pagenum} {numpages} {today} {path1} {path2} {paths}"
     
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--help",action="help")
     parser.add_argument("-o", default="out.pdf", help="Output filename")
     parser.add_argument("--font", default="Courier", help="Font filename or name of builtin font")
     parser.add_argument("path1", help="First path to scan")
@@ -67,13 +111,49 @@ def main():
     parser.add_argument("--footer-left", default="{today}", help=f"Footer left side. Macros: {MACROS}" )
     parser.add_argument("--footer-right", default="", help=f"Footer right side. Macros: {MACROS}" )
     parser.add_argument("--font-size", default=10, help="Font size, in points")
-    parser.add_argument("--top-margin", default=0.5, help="Margin from top of page to header")
     parser.add_argument("--ignore", action="append", help="Glob pattern for files to ignore")
+    parser.add_argument("-w",default="8.5in",help=f"Page width. Use suffix of {DIMENSION_STRING}")
+    parser.add_argument("-h",default="11in",help=f"Page height. Use suffix of {DIMENSION_STRING}")
+    parser.add_argument("--content-margin-top",default="0.75in",help=f"Distance from page top to content. Use suffix of {DIMENSION_STRING}")
+    parser.add_argument("--content-margin-bottom",default="0.75in",help=f"Distance from page bottom to content. Use suffix of {DIMENSION_STRING}")
+    parser.add_argument("--header-margin", default="0.5in", help="Distance from top of page to header")
+    parser.add_argument("--footer-margin", default="0.5in", help="Distance from bottom of page to footer")
+    parser.add_argument("--left-margin", default="0.5in", help="Left margin")
+    parser.add_argument("--right-margin", default="0.5in", help="Right margin")
+    parser.add_argument("--color-insert-line-number", default="0.5,0.5,0.5", help="Color for line numbers of inserted lines. Specify three numbers 0...1 separated by commas (example: '0,0,0')")
+    parser.add_argument("--color-delete-line-number", default="0.5,0.5,0.5", help="Color for line numbers of deleted lines. Specify three numbers 0...1 separated by commas (example: '0,0,0')")
+    parser.add_argument("--color-context-line-number", default="0.5,0.5,0.5", help="Color for line numbers of context lines. Specify three numbers 0...1 separated by commas (example: '0,0,0')")
+    parser.add_argument("--color-insert-text", default="0,0,0", help="Color for text of inserted lines. Specify three numbers 0...1 separated by commas (example: '0,0,0')")
+    parser.add_argument("--color-delete-text", default="0,0,0", help="Color for text of deleted lines. Specify three numbers 0...1 separated by commas (example: '0,0,0')")
+    parser.add_argument("--color-context-text", default="0.5,0.5,0.5", help="Color for text of context lines. Specify three numbers 0...1 separated by commas (example: '0,0,0')")
+    parser.add_argument("--color-margin-line", default="0,0,0", help="Color for margin line")
+    parser.add_argument("--color-chunk-separator", default="0.5,0.5,0.5", help="Color for chunk separator")
+    parser.add_argument("--color-filename", default="0,0,0", help="Color for chunk filenames")
+    parser.add_argument("--color-filename-lines", default="0,0,0", help="Color for filename separator lines")
+    parser.add_argument("--ignore-blank-lines", default="yes", choices=["yes","no"], help="Ignore blank lines in input files")
+    parser.add_argument("--date-format",default="%Y-%b-%d",help="Date format. %%b=month, %%d=day, %%Y=year; %%H=hour, %%M=minute, %%S=second; other strftime escapes are supported")
+    parser.add_argument("--color-insert-background", default="0.8,0.8,0.8", help="Background color for inserted text. Specify three numbers 0...1 separated by commas (example: '0,0,0').")
+    parser.add_argument("--color-delete-background", default="1,1,1", help="Background color for deleted text. Specify three numbers 0...1 separated by commas (example: '0,0,0').")
+    parser.add_argument("--color-context-background", default="1,1,1", help="Background color for context text. Specify three numbers 0...1 separated by commas (example: '0,0,0').")
+    parser.add_argument("--strikeout-width", default="0.5pt", help=f"Width of strikeout line. Use 0pt to omit. Specify a suffix of {DIMENSION_STRING}.")
+    parser.add_argument("--underline-width", default="0.5pt", help=f"Width of underlines. Use 0pt to omit. Specify a suffix of {DIMENSION_STRING}.")
+    parser.add_argument("--underline-pattern", default="1,2", help=f"Dash pattern: Should be a series of numbers separated by commas. Numbers specify length in points. For solid underlines, specify a single value of -1")
+    parser.add_argument("--header-line-width", default="0.5pt", help=f"Width of header/footer. Use 0pt to omit. Specify a suffix of {DIMENSION_STRING}.")
+
+    #insert-text 0,0.5,0
+    #delete-text 0,5,0,0
+    #context-text: 0.5,0.5,0.5
+    #insert-background: 0.8,1,0.8
+    #delete-background: 1,0.8,0.8
+    #context-background: 0.8,0.8,1.0
+    #insert-line: 0.3,0.8,0.3
+    #delete-line: 1.0,0.5,0.5
+    #context-line: 0.5,0.5,1.0
     
     args = parser.parse_args()
     
-    pageHeight = 11*72
-    pageWidth = 8.5*72
+    pageHeight = toPoints(args.h)
+    pageWidth = toPoints(args.w)
     outputFile = args.o
 
     if not args.ignore:
@@ -96,31 +176,35 @@ def main():
     
     fontSize = float(args.font_size)
 
-    headerMargin = float(args.top_margin)*72       #margin from top of page to header
-    contentMarginTop = 0.75*72           #margin from top of page to content
-    contentMarginBottom = 0.75*72           #margin from top of page to content
-    footerMargin = 0.5*72       #margin from bottom of page to footer
-    leftMargin = 0.5*72
-    rightMargin = 0.5*72
-    centerMargin = 0.125*72     #margin around dividing line
+    headerMargin = toPoints(args.header_margin)
+    contentMarginTop = toPoints(args.content_margin_top)
+    contentMarginBottom = toPoints(args.content_margin_bottom)
+    footerMargin = toPoints(args.content_margin_bottom)
+    leftMargin = toPoints(args.left_margin)
+    rightMargin = toPoints(args.right_margin)
 
-    centerX = 0.5*pageWidth
-
-    colorInsertLineNumber = (0.3,0.8,0.3)
-    colorDeleteLineNumber = (1.0,0.5,0.5)
-    colorContextLineNumber = (0.5,0.5,1.0)
-    colorContextText = (0.5,0.5,0.5)
-    colorInsertedText = (0,0.5,0)
-    colorDeletedText = (0.5,0,0)
-    textColor = (0,0,0)
-    marginLineColor = (1,1,0)
-    chunkSeparatorColor = (0.5,0.5,0.5)
-    filenameColor = (1,0.5,0)
-
-
-    ignoreBlankLines=True
-    dir1 = sys.argv[1]
-    dir2 = sys.argv[2]
+    colorInsertLineNumber = toColor(args.color_insert_line_number)
+    colorDeleteLineNumber = toColor(args.color_delete_line_number)
+    colorContextLineNumber = toColor(args.color_context_line_number)
+    colorContextText = toColor(args.color_context_text)
+    colorInsertedText = toColor(args.color_insert_text)
+    colorDeletedText = toColor(args.color_delete_text)
+    colorContextBackground = toColor(args.color_context_background)
+    colorInsertedBackground = toColor(args.color_insert_background)
+    colorDeletedBackground = toColor(args.color_delete_background)
+    #textColor = (0,0,0)
+    headerLineColor = toColor(args.color_margin_line)
+    chunkSeparatorColor = toColor(args.color_chunk_separator)
+    filenameColor = toColor(args.color_filename)
+    filenameLinesColor = toColor(args.color_filename_lines)
+    ignoreBlankLines=args.ignore_blank_lines
+    strikeoutWidth = toPoints(args.strikeout_width)
+    underlineWidth = toPoints(args.underline_width)
+    headerLineWidth = toPoints(args.header_line_width)
+    underlinePattern = parseDashPattern(args.underline_pattern)
+    
+    dir1 = args.path1
+    dir2 = args.path2
 
     tmp=[]
     p1 = os.path.abspath(dir1).split(os.path.sep)
@@ -134,7 +218,7 @@ def main():
     if len(p2) == 0:
         pathdelta = os.path.basename(dir1) + "→" + os.path.basename(dir2)
     else:
-        pathdelta = os.path.sep.join(p1) + "→" +os.path.sep.join(p2)
+        pathdelta = os.path.sep.join(p1) + " > " +os.path.sep.join(p2)       #"→"
 
 
     if "." in normalFontFile:
@@ -170,8 +254,8 @@ def main():
         # ~ boldItalicFontName = "Courier-BoldOblique"
 
 
-    tmp = datetime.date.today()
-    today = tmp.strftime("%Y-%b-%d")
+    tmp = datetime.datetime.now()
+    today = tmp.strftime(args.date_format)
 
     ascent, descent = reportlab.pdfbase.pdfmetrics.getAscentDescent( normalFontName, fontSize)
 
@@ -186,7 +270,7 @@ def main():
         tmp=[]
         for s in [headerLeft, headerRight, footerLeft, footerRight]:
             s = s.replace("{pagenum}", str(pageNum) )
-            s = s.replace("{numpages}", str(numPages) )
+            s = s.replace("{numpages}", str(numPages-1) )
             s = s.replace("{today}", today )
             s = s.replace("{path1}", dir1 )
             s = s.replace("{path2}", dir2 )
@@ -207,23 +291,23 @@ def main():
 
         cvs.drawString(leftMargin, pageHeight-headerMargin, hl )
         cvs.drawRightString(pageWidth-rightMargin, pageHeight-headerMargin,hr)
-        cvs.drawString(leftMargin, footerMargin, fl )
-        cvs.drawRightString(pageWidth-rightMargin, footerMargin, fr )
+        cvs.drawString(leftMargin, footerMargin-fontSize, fl )
+        cvs.drawRightString(pageWidth-rightMargin, footerMargin-fontSize, fr )
         
         pageNum+=1
         if numPages < pageNum:
             numPages = pageNum
 
-        cvs.setStrokeColorRGB(*marginLineColor)
+        cvs.setStrokeColorRGB(*headerLineColor)
         
-        cvs.setLineWidth(0.5)
+        cvs.setLineWidth(headerLineWidth)
         cvs.line( leftMargin, pageHeight-contentMarginBottom,
                   pageWidth-rightMargin, pageHeight-contentMarginBottom
         )
         cvs.line( leftMargin, contentMarginTop,
                   pageWidth-rightMargin, contentMarginTop
         )
-        cvs.setStrokeColorRGB(0,0,0)
+        # ~ cvs.setStrokeColorRGB(0,0,0)
         pageIsOpen=True
         Y = pageHeight - contentMarginBottom - fontSize
 
@@ -273,26 +357,34 @@ def main():
             else:
                 numdots = numLineNumberDigits
             t.textOut( ("."*numdots) + " " )
-        t.setFillColorRGB(*textColor)
-        t.setStrokeColorRGB(*textColor)
+        #t.setFillColorRGB(*textColor)
+        #t.setStrokeColorRGB(*textColor)
+        x = t.getX()
         cvs.drawText(t)
-        return t.getX() + leftMargin
+        return x
 
     def drawStrikeoutsAndUnderlines(strikes,underlines):
-        cvs.saveState()
-        #FIXME: Set color and line width
-        for x1,x2,y in strikes:
+        currcolor = None
+        currw = None
+        currdash=None
+        for x1,x2,y,width,color,dashPattern in strikes+underlines:
+            if currcolor != color:
+                cvs.setStrokeColorRGB( *color )
+                currcolor = color
+            if currw != width:
+                cvs.setLineWidth( width )
+                currw = width
+            dashPattern = tuple(dashPattern)
+            if currdash != dashPattern:
+                cvs.setDash(dashPattern)
+                currdash = dashPattern
+            dp = tuple(dashPattern)
             cvs.line( x1,y,x2,y )
-        #FIXME: Set color and line width
-        for x1,x2,y in underlines:
-            cvs.line( x1,y,x2,y )
-        cvs.restoreState()
+        cvs.setDash([])
 
     def drawRect(x,y,w,h,color):
-        cvs.saveState()
         cvs.setFillColorRGB(*color)
         cvs.rect(x,y,w,h,stroke=0,fill=1)
-        cvs.restoreState()
 
     def charWidth(c):
         return reportlab.pdfbase.pdfmetrics.stringWidth(
@@ -311,10 +403,13 @@ def main():
         match(changeType):
             case ChangeType.INSERTED:
                 fg = colorInsertedText
+                bg = colorInsertedBackground
             case ChangeType.DELETED:
                 fg = colorDeletedText
+                bg = colorDeletedBackground
             case ChangeType.CONTEXT:
                 fg = colorContextText
+                bg = colorContextBackground
             case _:
                 assert 0,f"{changeType}"
         t.setFillColorRGB( *fg )
@@ -333,6 +428,7 @@ def main():
                     y1 = Y+0.5*fontSize
                     y2 = y1 + 0.3*fontSize
                     y3 = y1 - 0.3*fontSize
+                    cvs.setFillColorRGB( *colorDeletedText )
                     p = cvs.beginPath()
                     p.moveTo(x1,y2)
                     p.lineTo(x1,y3)
@@ -364,19 +460,20 @@ def main():
             if not c.isspace():
                 startDrawingLines=True
 
-            if changeType == ChangeType.INSERTED and startDrawingLines:
+            if bg != None and startDrawingLines:
                 w = charWidth(c)
-                drawRect(t.getX(),Y+descent,w,fontSize*0.95, (0.8,1,0.8) )
+                drawRect(t.getX(),Y+descent,w,fontSize*0.95, bg )
 
             x1 = t.getX()
             t.textOut(c)
             x2 = t.getX()
 
 
-            if changeType == ChangeType.DELETED and startDrawingLines:
-                strikes.append( (x1,x2,Y + fontSize * 0.4) )
-            #if changeType == ChangeType.INSERTED and startDrawingLines:
-            #    underlines.append( (x1,x2,t.getY()-0.07*fontSize ) )
+            if changeType == ChangeType.DELETED and startDrawingLines and strikeoutWidth > 0:
+                strikes.append( (x1,x2,Y + fontSize * 0.4, strikeoutWidth, colorDeletedText, []) )
+                
+            if changeType == ChangeType.INSERTED and startDrawingLines and underlineWidth > 0:
+                underlines.append( (x1,x2,Y-0.07*fontSize, underlineWidth, colorInsertedText, underlinePattern ) )
 
 
         cvs.drawText(t)
@@ -392,10 +489,8 @@ def main():
 
 
     def drawChunkSeparator(Y):
-        cvs.saveState()
         cvs.setStrokeColorRGB(*chunkSeparatorColor)
         drawLine( leftMargin, Y, pageWidth-rightMargin, Y, 0.5, chunkSeparatorColor, dash=[5,4] )
-        cvs.restoreState()
 
 
 
@@ -437,15 +532,17 @@ def main():
             if len(changeset[fname]) >= 1 and changeset[fname][0].type == ChangeType.DIFFERING_BINARY:
                 txt += " [binary files differ]"
             preparePage()
-            drawLine(leftMargin,Y,pageWidth-rightMargin,Y,0.5,filenameColor)
+            drawLine(leftMargin,Y,pageWidth-rightMargin,Y,0.5,filenameLinesColor)
             Y-=SPACE
-            drawLine(leftMargin,Y,pageWidth-rightMargin,Y,0.5,filenameColor)
+            drawLine(leftMargin,Y,pageWidth-rightMargin,Y,0.5,filenameLinesColor)
             Y-=fontSize
+            cvs.setFillColorRGB(*filenameColor)
+            cvs.setStrokeColorRGB(*filenameColor)
             cvs.drawCentredString(pageWidth/2,Y,txt)
             Y-=SPACE
-            drawLine(leftMargin,Y,pageWidth-rightMargin,Y,0.5,filenameColor)
+            drawLine(leftMargin,Y,pageWidth-rightMargin,Y,0.5,filenameLinesColor)
             Y-=SPACE
-            drawLine(leftMargin,Y,pageWidth-rightMargin,Y,0.5,filenameColor)
+            drawLine(leftMargin,Y,pageWidth-rightMargin,Y,0.5,filenameLinesColor)
             Y-=fontSize
 
             changes = changeset[fname]
@@ -503,14 +600,62 @@ def main():
     return
 
 
+def insertedEntireFile( fname, changeset ):
+
+    if os.path.isdir(fname):
+        for dirpath,dirs,files in os.walk(fname):
+            for f in files:
+                insertedEntireFile(os.path.join(dirpath,f), changeset)
+        return
+
+    assert fname not in changeset
+    changeset[fname]=[]
+    
+    changeset[fname].append(
+        ChangeInfo( type=ChangeType.ADDED_FILE,
+                    line1=1,
+                    line2=1,
+                    content=fname
+        )
+    )
+
+    with open(fname, errors="replace") as fp:
+        data = fp.read()
+    isBinary=False
+    #if we have more than 50% of file is binary, note that fact
+    numBin=0
+    numAscii=0
+    for c in data[:100]:
+        if c.isascii() and c.isprintable():
+            numAscii+=1
+        else:
+            numBin+=1
+    totalChars = numBin+numAscii
+    if totalChars > 0:
+        if numBin / totalChars >= 0.5:
+            data = "This file contains binary data"
+    print(fname,"is",numBin,numAscii)
+
+    lines = data.split("\n")
+    for idx,txt in enumerate(lines):
+        changeset[fname].append(
+            ChangeInfo( type=ChangeType.INSERTED,
+                        line1=1,
+                        line2=idx+1,
+                        content=txt
+            )
+        )
+
 def getDifferences(dir1,dir2):
     os.putenv("DFT_UNSTABLE","yes")
     P = subprocess.Popen(
         [
             "diff",
             "--ignore-all-space",
+            "--ignore-blank-lines",
             "-r",
             "--unified=3",
+            "--minimal",
             dir1,
             dir2
         ],
@@ -537,54 +682,21 @@ def getDifferences(dir1,dir2):
 
         if line.startswith("diff "):
             i+=1
-        elif line.startswith("Only in"):
+        elif line.startswith("Only in "):
             M = onlyInRex.search(line)
             assert M
 
             fname = os.path.join(M.group(1),M.group(2))
-            assert fname not in changeset
-            changeset[fname]=[]
 
             # ~ print("Added",fname,": From 'Only in'")
 
-            if M.group(1) == dir2:
+            if M.group(1).startswith(dir2):
                 #entire file was inserted
-                changeset[fname].append(
-                    ChangeInfo( type=ChangeType.ADDED_FILE,
-                                line1=1,
-                                line2=1,
-                                content=fname
-                    )
-                )
-
-                with open(os.path.join(fname), errors="replace") as fp:
-                    data = fp.read()
-                isBinary=False
-                #if we have more than 50% of file is binary, note that fact
-                numBin=0
-                numAscii=0
-                for c in data[:100]:
-                    if c.isascii() and c.isprintable():
-                        numAscii+=1
-                    else:
-                        numBin+=1
-                totalChars = numBin+numAscii
-                if totalChars > 0:
-                    if numBin / totalChars >= 0.5:
-                        data = "This file contains binary data"
-                print(fname,"is",numBin,numAscii)
-
-                lines = data.split("\n")
-                for idx,txt in enumerate(lines):
-                    changeset[fname].append(
-                        ChangeInfo( type=ChangeType.INSERTED,
-                                    line1=1,
-                                    line2=idx+1,
-                                    content=txt
-                        )
-                    )
-            elif M.group(1) == dir1:
+                insertedEntireFile( fname, changeset )
+            elif M.group(1).startswith(dir1):
                 #entire file was deleted
+                assert fname not in changeset
+                changeset[fname]=[]
                 changeset[fname].append(
                     ChangeInfo( type=ChangeType.REMOVED_FILE,
                                 line1=1,
@@ -593,6 +705,10 @@ def getDifferences(dir1,dir2):
                     )
                 )
             else:
+                print("M=",M)
+                print("M.group(1)=",M.group(1))
+                print("dir1=",dir1)
+                print("dir2=",dir2)
                 assert 0,f"{line}"
             i+=1
         elif line.startswith("---"):
