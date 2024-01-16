@@ -22,8 +22,6 @@
 # SOFTWARE.
 
 
-#FIXME: Display containing function and/or class
-
 #Uses Reportlab (https://www.reportlab.com/opensource/)
 
 import reportlab.pdfgen.canvas
@@ -57,7 +55,7 @@ def error(msg):
     sys.stderr.write(msg)
     sys.stderr.write("\n")
     sys.exit(1)
-    
+
 DIMENSIONS={
     "in": 72, "cm": 72/2.54, "mm": 720/2.54, "pt": 1
 }
@@ -95,15 +93,84 @@ def parseDashPattern(p):
         return tmp
     except ValueError:
         error("Dash pattern should be a sequence of numbers separated by commas or else a single value of -1 to indicate no dashes")
-        
+
+
+#approximation of a function call. Need to check later
+#to verify group 1 is not keyword: if, while, etc.
+funcrex = re.compile(r"\s*([A-Za-z_]\w*\s+)*([A-Za-z_]\w*)\s*\([^)]*\)\s*\{")
+classrex = re.compile(r"\s*(public\s+)?class\s+(\w+)\s*[:{]")
+def getContainingFunction(filename, lineNumber):
+    with open(filename,errors="ignore") as fp:
+        data = fp.read()
+    idx=0
+    lineNum=1
+    klass=""
+    func=""
+
+    def checkClass():
+        nonlocal klass
+        M = classrex.match(data,idx)
+        if M:
+            klass = "class "+M.group(2)
+
+    def checkFunc():
+        nonlocal func
+        M = funcrex.match(data,idx)
+        if M:
+            word = M.group(2)
+            if word not in ["if","while","for","foreach"]:
+                func = "function "+word
+
+    if idx == len(data) or lineNum >= lineNumber:
+        checkClass()
+        checkFunc()
+
+    while idx < len(data) and lineNum < lineNumber:
+
+        checkClass()
+        checkFunc()
+
+        i = data.find("\n", idx )
+        if i == -1:
+            return "[not in a function]"
+        idx = i+1
+        lineNum+=1
+
+    if klass and func:
+        return f"{klass} , {func}"
+    elif klass:
+        return klass
+    elif func:
+        return func
+    else:
+        return None
+
+fontCounter=1
+def registerFont(filename):
+    global fontCounter
+    if "." in filename:
+        fontname = f"MyFont{fontCounter}"
+        fontCounter+=1
+        reportlab.pdfbase.pdfmetrics.registerFont(
+            reportlab.pdfbase.ttfonts.TTFont( fontname, filename )
+        )
+    else:
+        #builtin font
+        fontname = filename
+    return fontname
+
 def main():
 
     MACROS = "{pagenum} {numpages} {today} {path1} {path2} {paths}"
-    
+    COLOR_HELP = "Specify three numbers 0...1 separated by commas (example: '0,0,0')."
+    DIMENSION_HELP = f"Use suffix of {DIMENSION_STRING}."
+    FONT_HELP = ("May be the name of a builtin font or else the location of a .ttf file. Builtin fonts: "
+                 "Times-{Roman,Bold,Italic,BoldItalic}, Courier[-Bold,-Oblique,-BoldOblique], "
+                 "Helvetica[-Bold,-Oblique,-BoldOblique]")
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--help",action="help")
     parser.add_argument("-o", default="out.pdf", help="Output filename")
-    parser.add_argument("--font", default="Courier", help="Font filename or name of builtin font")
+    parser.add_argument("--font", default="Courier", help=f"Font for document. {FONT_HELP}")
     parser.add_argument("path1", help="First path to scan")
     parser.add_argument("path2", help="Second path to scan")
     parser.add_argument("--header-left", default="{paths}", help=f"Header left side. Macros: {MACROS}" )
@@ -111,34 +178,37 @@ def main():
     parser.add_argument("--footer-left", default="{today}", help=f"Footer left side. Macros: {MACROS}" )
     parser.add_argument("--footer-right", default="", help=f"Footer right side. Macros: {MACROS}" )
     parser.add_argument("--font-size", default=10, help="Font size, in points")
-    parser.add_argument("--ignore", action="append", help="Glob pattern for files to ignore")
-    parser.add_argument("-w",default="8.5in",help=f"Page width. Use suffix of {DIMENSION_STRING}")
+    parser.add_argument("--ignore", action="append", help="Glob pattern for files to ignore. May be repeated.")
+    parser.add_argument("-w",default="8.5in",help=f"Page width. {DIMENSION_HELP}")
     parser.add_argument("-h",default="11in",help=f"Page height. Use suffix of {DIMENSION_STRING}")
-    parser.add_argument("--content-margin-top",default="0.75in",help=f"Distance from page top to content. Use suffix of {DIMENSION_STRING}")
-    parser.add_argument("--content-margin-bottom",default="0.75in",help=f"Distance from page bottom to content. Use suffix of {DIMENSION_STRING}")
-    parser.add_argument("--header-margin", default="0.5in", help="Distance from top of page to header")
-    parser.add_argument("--footer-margin", default="0.5in", help="Distance from bottom of page to footer")
-    parser.add_argument("--left-margin", default="0.5in", help="Left margin")
-    parser.add_argument("--right-margin", default="0.5in", help="Right margin")
-    parser.add_argument("--color-insert-line-number", default="0.5,0.5,0.5", help="Color for line numbers of inserted lines. Specify three numbers 0...1 separated by commas (example: '0,0,0')")
-    parser.add_argument("--color-delete-line-number", default="0.5,0.5,0.5", help="Color for line numbers of deleted lines. Specify three numbers 0...1 separated by commas (example: '0,0,0')")
-    parser.add_argument("--color-context-line-number", default="0.5,0.5,0.5", help="Color for line numbers of context lines. Specify three numbers 0...1 separated by commas (example: '0,0,0')")
-    parser.add_argument("--color-insert-text", default="0,0,0", help="Color for text of inserted lines. Specify three numbers 0...1 separated by commas (example: '0,0,0')")
-    parser.add_argument("--color-delete-text", default="0,0,0", help="Color for text of deleted lines. Specify three numbers 0...1 separated by commas (example: '0,0,0')")
-    parser.add_argument("--color-context-text", default="0.5,0.5,0.5", help="Color for text of context lines. Specify three numbers 0...1 separated by commas (example: '0,0,0')")
-    parser.add_argument("--color-margin-line", default="0,0,0", help="Color for margin line")
-    parser.add_argument("--color-chunk-separator", default="0.5,0.5,0.5", help="Color for chunk separator")
-    parser.add_argument("--color-filename", default="0,0,0", help="Color for chunk filenames")
-    parser.add_argument("--color-filename-lines", default="0,0,0", help="Color for filename separator lines")
-    parser.add_argument("--ignore-blank-lines", default="yes", choices=["yes","no"], help="Ignore blank lines in input files")
+    parser.add_argument("--content-margin-top",default="0.75in",help=f"Distance from page top to content. {DIMENSION_HELP}")
+    parser.add_argument("--content-margin-bottom",default="0.75in",help=f"Distance from page bottom to content. {DIMENSION_HELP}")
+    parser.add_argument("--header-margin", default="0.5in", help=f"Distance from top of page to header. {DIMENSION_HELP}")
+    parser.add_argument("--footer-margin", default="0.5in", help=f"Distance from bottom of page to footer. {DIMENSION_HELP}")
+    parser.add_argument("--left-margin", default="0.5in", help=f"Left margin. {DIMENSION_HELP}")
+    parser.add_argument("--right-margin", default="0.5in", help=f"Right margin. {DIMENSION_HELP}")
+    parser.add_argument("--color-insert-line-number", default="0.5,0.5,0.5", help=f"Color for line numbers of inserted lines. {COLOR_HELP}")
+    parser.add_argument("--color-delete-line-number", default="0.5,0.5,0.5", help=f"Color for line numbers of deleted lines. {COLOR_HELP}")
+    parser.add_argument("--color-context-line-number", default="0.5,0.5,0.5", help=f"Color for line numbers of context lines. {COLOR_HELP}")
+    parser.add_argument("--color-insert-text", default="0,0,0", help=f"Color for text of inserted lines. {COLOR_HELP}")
+    parser.add_argument("--color-delete-text", default="0,0,0", help=f"Color for text of deleted lines. {COLOR_HELP}")
+    parser.add_argument("--color-context-text", default="0.5,0.5,0.5", help=f"Color for text of context lines. {COLOR_HELP}")
+    parser.add_argument("--color-margin-line", default="0,0,0", help=f"Color for margin line. {DIMENSION_HELP}")
+    parser.add_argument("--color-chunk-separator", default="0.5,0.5,0.5", help=f"Color for chunk separator. {COLOR_HELP}")
+    parser.add_argument("--color-filename", default="0,0,0", help=f"Color for chunk filenames. {COLOR_HELP}")
+    parser.add_argument("--color-filename-lines", default="0,0,0", help=f"Color for filename separator lines. {COLOR_HELP}")
+    parser.add_argument("--ignore-blank-lines", default="yes", choices=["yes","no"], help="Ignore blank lines in input files: yes or no.")
     parser.add_argument("--date-format",default="%Y-%b-%d",help="Date format. %%b=month, %%d=day, %%Y=year; %%H=hour, %%M=minute, %%S=second; other strftime escapes are supported")
-    parser.add_argument("--color-insert-background", default="0.8,0.8,0.8", help="Background color for inserted text. Specify three numbers 0...1 separated by commas (example: '0,0,0').")
-    parser.add_argument("--color-delete-background", default="1,1,1", help="Background color for deleted text. Specify three numbers 0...1 separated by commas (example: '0,0,0').")
-    parser.add_argument("--color-context-background", default="1,1,1", help="Background color for context text. Specify three numbers 0...1 separated by commas (example: '0,0,0').")
-    parser.add_argument("--strikeout-width", default="0.5pt", help=f"Width of strikeout line. Use 0pt to omit. Specify a suffix of {DIMENSION_STRING}.")
-    parser.add_argument("--underline-width", default="0.5pt", help=f"Width of underlines. Use 0pt to omit. Specify a suffix of {DIMENSION_STRING}.")
+    parser.add_argument("--color-insert-background", default="0.8,0.8,0.8", help=f"Background color for inserted text. {COLOR_HELP}")
+    parser.add_argument("--color-delete-background", default="1,1,1", help=f"Background color for deleted text. {COLOR_HELP}")
+    parser.add_argument("--color-context-background", default="1,1,1", help=f"Background color for context text. {COLOR_HELP}")
+    parser.add_argument("--strikeout-width", default="0.5pt", help=f"Width of strikeout line. Use 0pt to omit. {DIMENSION_HELP}")
+    parser.add_argument("--underline-width", default="0.5pt", help=f"Width of underlines. Use 0pt to omit. {DIMENSION_HELP}")
     parser.add_argument("--underline-pattern", default="1,2", help=f"Dash pattern: Should be a series of numbers separated by commas. Numbers specify length in points. For solid underlines, specify a single value of -1")
-    parser.add_argument("--header-line-width", default="0.5pt", help=f"Width of header/footer. Use 0pt to omit. Specify a suffix of {DIMENSION_STRING}.")
+    parser.add_argument("--header-line-width", default="0.5pt", help=f"Thickness of header/footer line. Use 0pt to omit. {DIMENSION_HELP}.")
+    parser.add_argument("--show-containing-function", default="yes", choices=["yes","no"],help=f"Show containing function for each chunk (yes or no)")
+    parser.add_argument("--containing-function-font", default="Courier-Oblique", help=f"Font for containing function. {FONT_HELP}")
+    parser.add_argument("--containing-function-color", default="0.5,0.5,0.5", help=f"Color for containing function. {COLOR_HELP}")
 
     #insert-text 0,0.5,0
     #delete-text 0,5,0,0
@@ -149,9 +219,9 @@ def main():
     #insert-line: 0.3,0.8,0.3
     #delete-line: 1.0,0.5,0.5
     #context-line: 0.5,0.5,1.0
-    
+
     args = parser.parse_args()
-    
+
     pageHeight = toPoints(args.h)
     pageWidth = toPoints(args.w)
     outputFile = args.o
@@ -163,7 +233,7 @@ def main():
         ]
     else:
         ignoreGlobs = args.ignore[:]
-        
+
     normalFontFile = args.font
     # ~ boldFontFile = None
     # ~ italicFontFile = None
@@ -173,7 +243,7 @@ def main():
     headerRight = args.header_right
     footerLeft = args.footer_left
     footerRight = args.footer_right
-    
+
     fontSize = float(args.font_size)
 
     headerMargin = toPoints(args.header_margin)
@@ -202,7 +272,10 @@ def main():
     underlineWidth = toPoints(args.underline_width)
     headerLineWidth = toPoints(args.header_line_width)
     underlinePattern = parseDashPattern(args.underline_pattern)
-    
+    showContainingFunction = (args.show_containing_function=="yes")
+    containingFunctionFontFile = args.containing_function_font
+    containingFunctionColor = toColor(args.containing_function_color)
+
     dir1 = args.path1
     dir2 = args.path2
 
@@ -220,14 +293,8 @@ def main():
     else:
         pathdelta = os.path.sep.join(p1) + " > " +os.path.sep.join(p2)       #"→"
 
-
-    if "." in normalFontFile:
-        reportlab.pdfbase.pdfmetrics.registerFont(
-            reportlab.pdfbase.ttfonts.TTFont( "MyFontNormal", normalFontFile )
-        )
-        normalFontName = "MyFontNormal"
-    else:
-        normalFontName = normalFontFile
+    normalFontName = registerFont(normalFontFile)
+    containingFunctionFontName = registerFont( containingFunctionFontFile )
 
     # ~ if boldFontFile != None:
         # ~ reportlab.pdfbase.pdfmetrics.registerFont(
@@ -277,14 +344,14 @@ def main():
             s = s.replace("{paths}", pathdelta )
             tmp.append(s)
         return tmp
-        
+
     def preparePage():
         nonlocal pageIsOpen,Y,pageNum,numPages
         if pageIsOpen:
             return
 
         hl, hr, fl, fr = getHeaderAndFooter()
-        
+
         cvs.setFillColorRGB(0,0,0)
         cvs.setStrokeColorRGB(0,0,0)
         cvs.setFont(normalFontName,fontSize)
@@ -293,13 +360,13 @@ def main():
         cvs.drawRightString(pageWidth-rightMargin, pageHeight-headerMargin,hr)
         cvs.drawString(leftMargin, footerMargin-fontSize, fl )
         cvs.drawRightString(pageWidth-rightMargin, footerMargin-fontSize, fr )
-        
+
         pageNum+=1
         if numPages < pageNum:
             numPages = pageNum
 
         cvs.setStrokeColorRGB(*headerLineColor)
-        
+
         cvs.setLineWidth(headerLineWidth)
         cvs.line( leftMargin, pageHeight-contentMarginBottom,
                   pageWidth-rightMargin, pageHeight-contentMarginBottom
@@ -342,10 +409,10 @@ def main():
                 color = colorContextLineNumber
             case _:
                 assert 0,f"{changeType}"
-                
+
         t.setFillColorRGB(*color)
         t.setStrokeColorRGB(*color)
-        
+
         if lineNumber == None:
             t.textOut( " "*(numLineNumberDigits+1) )
         elif isFirstLine:
@@ -396,10 +463,12 @@ def main():
 
         checkIfPageIsFull()
         preparePage()
-            
+
         x = outputLineNumber(cvs,Y,lineNumber,True,changeType)
 
         t = cvs.beginText(x,Y)
+        t.setFont( normalFontName, fontSize )
+
         match(changeType):
             case ChangeType.INSERTED:
                 fg = colorInsertedText
@@ -471,7 +540,7 @@ def main():
 
             if changeType == ChangeType.DELETED and startDrawingLines and strikeoutWidth > 0:
                 strikes.append( (x1,x2,Y + fontSize * 0.4, strikeoutWidth, colorDeletedText, []) )
-                
+
             if changeType == ChangeType.INSERTED and startDrawingLines and underlineWidth > 0:
                 underlines.append( (x1,x2,Y-0.07*fontSize, underlineWidth, colorInsertedText, underlinePattern ) )
 
@@ -538,6 +607,7 @@ def main():
             Y-=fontSize
             cvs.setFillColorRGB(*filenameColor)
             cvs.setStrokeColorRGB(*filenameColor)
+            cvs.setFont( normalFontName, fontSize )
             cvs.drawCentredString(pageWidth/2,Y,txt)
             Y-=SPACE
             drawLine(leftMargin,Y,pageWidth-rightMargin,Y,0.5,filenameLinesColor)
@@ -548,15 +618,15 @@ def main():
             changes = changeset[fname]
 
             i=0
-            firstChange=True
+            firstChunk=True
             while i < len(changes):
                 change = changes[i]
                 #change is a ChangeSet
 
                 if change.type == ChangeType.NEW_CHUNK:
                     #draw separator
-                    if firstChange:
-                        firstChange=False
+                    if firstChunk:
+                        firstChunk=False
                     else:
                         drawChunkSeparator(Y)
                         Y -= fontSize/4
@@ -564,6 +634,33 @@ def main():
                     checkIfPageIsFull()
 
                     numLineNumberDigits = 1+int(math.log10(max([change.line1,change.line2,1])))
+
+                    if showContainingFunction:
+                        filename1, filename2 = change.content
+                        # ~ print("CHCO:",change.content)
+                        # ~ containing1 = getContainingFunction(filename1, change.line1)
+                        containing2 = getContainingFunction(filename2, change.line2)
+                        if containing2:
+                            checkIfPageIsFull()
+                            preparePage()
+
+                            w = reportlab.pdfbase.pdfmetrics.stringWidth(containing2,
+                                containingFunctionFontName,
+                                fontSize
+                            )
+
+                            t = cvs.beginText(pageWidth/2 - w/2, Y)
+                            t.setFillColorRGB( *containingFunctionColor )
+                            t.setFont( containingFunctionFontName, fontSize )
+                            t.textOut(containing2)
+                            cvs.drawText(t)
+
+                            # ~ cvs.drawCentredString(pageWidth - w/2,Y,containing2)
+                            Y -= fontSize
+
+
+
+
 
                 elif change.type == ChangeType.DIFFERING_BINARY:
                     pass
@@ -610,7 +707,7 @@ def insertedEntireFile( fname, changeset ):
 
     assert fname not in changeset
     changeset[fname]=[]
-    
+
     changeset[fname].append(
         ChangeInfo( type=ChangeType.ADDED_FILE,
                     line1=1,
@@ -699,8 +796,8 @@ def getDifferences(dir1,dir2):
                 changeset[fname]=[]
                 changeset[fname].append(
                     ChangeInfo( type=ChangeType.REMOVED_FILE,
-                                line1=1,
-                                line2=1,
+                                line1=-1,
+                                line2=-1,
                                 content=fname
                     )
                 )
@@ -755,7 +852,7 @@ def getDifferences(dir1,dir2):
                 ChangeInfo( type=ChangeType.NEW_CHUNK,
                             line1=lineNum1,
                             line2=lineNum2,
-                            content=None
+                            content=(fname1,fname2)
                 )
             )
         elif line.startswith(" "):
@@ -813,7 +910,7 @@ def getDifferences(dir1,dir2):
 
     return changeset
 
- 
+
 main()
 
 
@@ -863,4 +960,3 @@ main()
 #<font name="foo" color="bar" size="14">...</font>
 #<b>...</b>
 #<i>...</i>
-
