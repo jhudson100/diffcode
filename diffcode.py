@@ -118,7 +118,7 @@ def getContainingFunction(filename, lineNumber):
         M = funcrex.match(data,idx)
         if M:
             word = M.group(2)
-            if word not in ["if","while","for","foreach"]:
+            if word not in ["if","while","for","foreach","switch"]:
                 func = "function "+word
 
     if idx == len(data) or lineNum >= lineNumber:
@@ -412,7 +412,7 @@ def main():
 
         t.setFillColorRGB(*color)
         t.setStrokeColorRGB(*color)
-
+        t.setFont(normalFontName,fontSize)
         if lineNumber == None:
             t.textOut( " "*(numLineNumberDigits+1) )
         elif isFirstLine:
