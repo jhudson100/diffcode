@@ -577,10 +577,10 @@ def main():
         preparePage()
         i=0
         for fname in sorted(changeset.keys()):
-
+            basename = os.path.basename(fname)
             ignore=False
             for p in ignoreGlobs:
-                if fnmatch.fnmatch(fname,p):
+                if fnmatch.fnmatch(basename,p) :
                     ignore=True
                     break
 
@@ -903,7 +903,7 @@ def getDifferences(dir1,dir2):
                     content=fname
                 )
             ]
-            print("Added",fname,"from binary differ")
+            # ~ print("Added",fname,"from binary differ")
             i+=1
         else:
             assert 0, f"-->{str(line)}<--"
