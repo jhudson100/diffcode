@@ -199,7 +199,7 @@ def main():
     parser.add_argument("--color-filename-lines", default="0,0,0", help=f"Color for filename separator lines. {COLOR_HELP}")
     parser.add_argument("--ignore-blank-lines", default="yes", choices=["yes","no"], help="Ignore blank lines in input files: yes or no.")
     parser.add_argument("--date-format",default="%Y-%b-%d",help="Date format. %%b=month, %%d=day, %%Y=year; %%H=hour, %%M=minute, %%S=second; other strftime escapes are supported")
-    parser.add_argument("--color-insert-background", default="0.8,0.8,0.8", help=f"Background color for inserted text. {COLOR_HELP}")
+    parser.add_argument("--color-insert-background", default="0.9,0.9,0.9", help=f"Background color for inserted text. {COLOR_HELP}")
     parser.add_argument("--color-delete-background", default="1,1,1", help=f"Background color for deleted text. {COLOR_HELP}")
     parser.add_argument("--color-context-background", default="1,1,1", help=f"Background color for context text. {COLOR_HELP}")
     parser.add_argument("--strikeout-width", default="0.5pt", help=f"Width of strikeout line. Use 0pt to omit. {DIMENSION_HELP}")
