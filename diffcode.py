@@ -209,6 +209,7 @@ def main():
     parser.add_argument("--show-containing-function", default="yes", choices=["yes","no"],help=f"Show containing function for each chunk (yes or no)")
     parser.add_argument("--containing-function-font", default="Courier-Oblique", help=f"Font for containing function. {FONT_HELP}")
     parser.add_argument("--containing-function-color", default="0.5,0.5,0.5", help=f"Color for containing function. {COLOR_HELP}")
+    parser.add_argument("--discard", action="append", help="Ignore specific change sets within a file. Argument is of form 'filename,lineNumber,linenumber,...'. May be repeated")
 
     #insert-text 0,0.5,0
     #delete-text 0,5,0,0
@@ -233,6 +234,20 @@ def main():
         ]
     else:
         ignoreGlobs = args.ignore[:]
+
+    #key=filename; value=list of ints: Discard any change set that
+    #includes any of those lines
+    changesToIgnoreByFilename={}
+    if args.discard:
+        for tmp in args.discard:
+            X = tmp.split(",")
+            ff=X[0]
+            for linenum in X[1:]:
+                linenum = int(linenum)
+                if ff not in changesToIgnoreByFilename:
+                    changesToIgnoreByFilename[ff]=[]
+                changesToIgnoreByFilename[ff].append(linenum)
+
 
     normalFontFile = args.font
     # ~ boldFontFile = None
@@ -622,6 +637,16 @@ def main():
             while i < len(changes):
                 change = changes[i]
                 #change is a ChangeSet
+
+                ignoreThisChange=False
+                for lineNumberToExclude in changesToIgnoreByFilename.get(os.path.basename(fname),[]):
+                    if change.line1 <= lineNumberToExclude and lineNumberToExclude <= change.line2:
+                        ignoreThisChange=True
+                        break
+
+                if ignoreThisChange:
+                    i+=1
+                    continue
 
                 if change.type == ChangeType.NEW_CHUNK:
                     #draw separator
